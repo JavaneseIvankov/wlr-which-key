@@ -61,6 +61,12 @@ inhibit_compositor_keyboard_shortcuts: true
 # Try to guess the correct keyboard layout to use. Default is `false`.
 auto_kbd_layout: true
 
+# Let key bindings match while extra modifiers are still held down.
+# By default the active modifiers must exactly match the configured ones, so a
+# plain `b` binding will not match if `Mod4` is still held from the key that
+# spawned the menu. Default is `false`.
+match_extra_modifiers: true
+
 menu:
   - key: "p"
     desc: Power

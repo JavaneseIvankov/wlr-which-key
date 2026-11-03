@@ -49,6 +49,16 @@ pub struct Config {
     pub inhibit_compositor_keyboard_shortcuts: bool,
     pub auto_kbd_layout: bool,
 
+    /// Let key bindings match while additional modifiers are still held.
+    ///
+    /// By default the active modifiers must exactly match the ones configured
+    /// for a binding. With this enabled, the configured modifiers only need to
+    /// be a subset of the active ones, so a plain `b` binding also matches
+    /// while `Mod4` is held down from the key that spawned the menu.
+    ///
+    /// Default is `false`.
+    pub match_extra_modifiers: bool,
+
     pub menu: Vec<Entry>,
 
     #[default(Namespace::new(c"wlr_which_key".to_owned()))]

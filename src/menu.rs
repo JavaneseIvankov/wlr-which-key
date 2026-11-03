@@ -14,6 +14,7 @@ pub struct Menu {
     pages: Vec<MenuPage>,
     cur_page: usize,
     separator: ComputedText,
+    match_extra_modifiers: bool,
 }
 
 struct MenuPage {
@@ -52,6 +53,7 @@ impl Menu {
             pages: Vec::new(),
             cur_page: 0,
             separator: ComputedText::new(&config.separator, &context, &config.font.0),
+            match_extra_modifiers: config.match_extra_modifiers,
         };
 
         this.push_page(&context, &config.menu, config, None)?;
@@ -227,9 +229,11 @@ impl Menu {
         let page = &self.pages[self.cur_page];
 
         let action = page.columns.iter().find_map(|col| {
-            col.items
-                .iter()
-                .find_map(|i| i.key.matches(sym, modifiers).then(|| i.action.clone()))
+            col.items.iter().find_map(|i| {
+                i.key
+                    .matches_with(sym, modifiers, self.match_extra_modifiers)
+                    .then(|| i.action.clone())
+            })
         });
         if action.is_some() {
             return action;
@@ -257,6 +261,12 @@ impl Menu {
         self.cur_page = page;
     }
 
+    #[cfg(test)]
+    fn from_yaml(yaml: &str) -> Self {
+        let config: Config = serde_yaml::from_str(yaml).expect("test config");
+        Self::new(&config).expect("test menu")
+    }
+
     pub fn navigate_to_key_sequence(&mut self, key_sequence: &str) -> Result<Option<Action>> {
         let mut last_action = None;
         for key_str in key_sequence.split_whitespace() {
@@ -271,5 +281,49 @@ impl Menu {
             }
         }
         Ok(last_action.map(|x| x.1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sym(c: char) -> xkb::Keysym {
+        xkb::utf32_to_keysym(c as u32)
+    }
+
+    fn super_held() -> ModifierState {
+        ModifierState {
+            mod_ctrl: false,
+            mod_alt: false,
+            mod_mod4: true,
+        }
+    }
+
+    const MENU: &str = r#"
+menu:
+  - key: "b"
+    desc: Browser
+    cmd: brave
+"#;
+
+    #[test]
+    fn keys_do_not_match_while_super_is_held_by_default() {
+        let menu = Menu::from_yaml(MENU);
+        assert!(menu.get_action(super_held(), sym('b')).is_none());
+        assert!(
+            menu.get_action(ModifierState::default(), sym('b'))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn keys_match_while_super_is_held_when_enabled() {
+        let menu = Menu::from_yaml(&format!("match_extra_modifiers: true\n{MENU}"));
+        assert!(menu.get_action(super_held(), sym('b')).is_some());
+        assert!(
+            menu.get_action(ModifierState::default(), sym('b'))
+                .is_some()
+        );
     }
 }

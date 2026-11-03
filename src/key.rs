@@ -24,6 +24,13 @@ impl ModifierState {
             mod_mod4: xkb.mod_name_is_active(xkb::MOD_NAME_LOGO, xkb::STATE_MODS_EFFECTIVE),
         }
     }
+
+    /// Returns `true` if every modifier enabled in `self` is also enabled in `other`.
+    pub fn is_subset_of(self, other: Self) -> bool {
+        (!self.mod_ctrl || other.mod_ctrl)
+            && (!self.mod_alt || other.mod_alt)
+            && (!self.mod_mod4 || other.mod_mod4)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -34,10 +41,27 @@ pub struct SingleKey {
 }
 
 impl Key {
-    pub fn matches(&self, sym: xkb::Keysym, modifiers: ModifierState) -> bool {
-        self.any_of
-            .iter()
-            .any(|key| key.modifiers == modifiers && key.keysym == sym)
+    /// Check whether this binding matches `sym`.
+    ///
+    /// When `allow_extra_modifiers` is `false`, the active modifiers must be
+    /// exactly the ones configured for the binding. When it is `true`, the
+    /// configured modifiers only need to be a subset of the active ones, so a
+    /// binding keeps matching while additional modifiers (e.g. the one used to
+    /// spawn the menu) are still held down.
+    pub fn matches_with(
+        &self,
+        sym: xkb::Keysym,
+        modifiers: ModifierState,
+        allow_extra_modifiers: bool,
+    ) -> bool {
+        self.any_of.iter().any(|key| {
+            key.keysym == sym
+                && if allow_extra_modifiers {
+                    key.modifiers.is_subset_of(modifiers)
+                } else {
+                    key.modifiers == modifiers
+                }
+        })
     }
 }
 
@@ -176,5 +200,78 @@ impl<'de> de::Deserialize<'de> for SingleKey {
         }
 
         deserializer.deserialize_str(KeyVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(s: &str) -> Key {
+        Key::from(s.parse::<SingleKey>().unwrap())
+    }
+
+    fn sym(c: char) -> xkb::Keysym {
+        xkb::utf32_to_keysym(c as u32)
+    }
+
+    fn mods(mod_ctrl: bool, mod_alt: bool, mod_mod4: bool) -> ModifierState {
+        ModifierState {
+            mod_ctrl,
+            mod_alt,
+            mod_mod4,
+        }
+    }
+
+    #[test]
+    fn exact_matching_is_the_default() {
+        let b = key("b");
+        assert!(b.matches_with(sym('b'), mods(false, false, false), false));
+        assert!(!b.matches_with(sym('b'), mods(false, false, true), false));
+        assert!(!b.matches_with(sym('b'), mods(true, false, false), false));
+    }
+
+    #[test]
+    fn extra_modifiers_are_ignored_when_enabled() {
+        let b = key("b");
+        assert!(b.matches_with(sym('b'), mods(false, false, false), true));
+        assert!(b.matches_with(sym('b'), mods(false, false, true), true));
+        assert!(b.matches_with(sym('b'), mods(true, true, true), true));
+        assert!(!b.matches_with(sym('c'), mods(false, false, true), true));
+    }
+
+    #[test]
+    fn configured_modifiers_are_still_required() {
+        let ctrl_b = key("Ctrl+b");
+        assert!(!ctrl_b.matches_with(sym('b'), mods(false, false, true), true));
+        assert!(ctrl_b.matches_with(sym('b'), mods(true, false, false), true));
+        assert!(ctrl_b.matches_with(sym('b'), mods(true, false, true), true));
+        assert!(ctrl_b.matches_with(sym('b'), mods(true, false, false), false));
+    }
+
+    #[test]
+    fn any_of_bindings_respect_extra_modifier_policy() {
+        let any = Key {
+            any_of: vec![
+                "b".parse().unwrap(),
+                "Ctrl+b".parse().unwrap(),
+            ],
+        };
+        assert!(any.matches_with(sym('b'), mods(false, false, true), true));
+        assert!(!any.matches_with(sym('b'), mods(false, false, true), false));
+        assert!(!any.matches_with(sym('b'), mods(true, false, true), false));
+    }
+
+    #[test]
+    fn modifier_subset_matching() {
+        let none = mods(false, false, false);
+        let mod4 = mods(false, false, true);
+        let all = mods(true, true, true);
+        assert!(none.is_subset_of(none));
+        assert!(none.is_subset_of(mod4));
+        assert!(none.is_subset_of(all));
+        assert!(!mod4.is_subset_of(none));
+        assert!(mod4.is_subset_of(all));
+        assert!(!all.is_subset_of(mod4));
     }
 }
